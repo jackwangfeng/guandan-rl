@@ -1,5 +1,8 @@
 # v8 设计:真规则掼蛋
 
+> **Status:** 实现完成,已训练 600k rounds(2026-05-18)。终评:vs rule_agent 多局 100%,单局 vs random 88.8% / vs rule 90.2%。
+> 实施时**接受简化**:同花顺不接受 wildcards;抗贡未建模;固定 SEQ5/PSEQ3/TSEQ2 长度。详见下方"风险"段。
+
 不和 v6/v7 共用 `env.py`,新写 `env_v8.py` + `features_v8.py` + `model_v8.py`(可同架构但维度不同)+ `train_v8.py`。
 
 ## 核心改动:加 suit 维度
