@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>掼蛋 - 1v3 AI</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="app">
+
+  <header>
+    <h1>掼蛋 · 1 人 vs 3 AI</h1>
+    <div class="meta">
+      <span id="level-info"></span>
+      <span id="status"></span>
+      <button id="new-game">新游戏</button>
+    </div>
+  </header>
+
+  <section class="table">
+    <div class="seat seat-opp-r" id="seat-opp-r">
+      <div class="label">右对手</div>
+      <div class="cards-count">27 张</div>
+    </div>
+    <div class="seat seat-teammate" id="seat-teammate">
+      <div class="label">队友</div>
+      <div class="cards-count">27 张</div>
+    </div>
+    <div class="seat seat-opp-l" id="seat-opp-l">
+      <div class="label">左对手</div>
+      <div class="cards-count">27 张</div>
+    </div>
+    <div class="center">
+      <div id="last-play" class="last-play">等待出牌</div>
+      <div id="last-by" class="last-by"></div>
+    </div>
+  </section>
+
+  <section class="hand">
+    <div class="label">你的手牌(<span id="hand-count">27</span> 张,<span id="hand-wild">0</span> 张万能)</div>
+    <div id="hand" class="hand-row"></div>
+  </section>
+
+  <section class="actions">
+    <div class="label">合法动作:</div>
+    <div id="moves" class="moves"></div>
+  </section>
+
+  <section class="log">
+    <div class="label">对局记录</div>
+    <ol id="log-list"></ol>
+  </section>
+
+</div>
+<script src="/app.js"></script>
+</body>
+</html>
