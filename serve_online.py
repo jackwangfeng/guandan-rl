@@ -22,7 +22,8 @@ from urllib.parse import urlparse
 import numpy as np
 import torch
 
-from env import GuandanEnv, NUM_TYPES, RANK_NAMES, JOKER_BOMB_RANK, COMBO_NAMES, move_str
+from env import (GuandanEnv, NUM_TYPES, RANK_NAMES, JOKER_BOMB_RANK,
+                 COMBO_NAMES, move_str, PASS, _apply_move_to_hand)
 from features import encode_state, encode_action
 from model import QNet, build_from_ckpt_args
 from agent import pick_action
@@ -32,14 +33,30 @@ from rule_agent import rule_choose
 HUMAN_SEAT = 0
 
 
-def serialize_move(m: tuple) -> dict:
+def serialize_move(m: tuple, env: GuandanEnv | None = None) -> dict:
     combo, rank, pair_rank, count, n_wild = m
-    return {
+    out = {
         'combo': int(combo), 'rank': int(rank), 'pair_rank': int(pair_rank),
         'count': int(count), 'n_wild': int(n_wild),
         'combo_name': COMBO_NAMES.get(combo, '?'),
         'human': move_str(m),
     }
+    if env is not None and combo != PASS:
+        # Compute exact card consumption from the current hand for matching against user selection.
+        hand = env.hands[env.cur]
+        wild = env.wildcards[env.cur]
+        try:
+            new_hand, new_wild = _apply_move_to_hand(hand, wild, env.level_rank, m)
+            consumed = (hand.astype(int) - new_hand.astype(int)).tolist()
+            consumed_wild = int(wild - new_wild)
+            out['consumed'] = consumed
+            out['consumed_wild'] = consumed_wild
+        except Exception:
+            pass
+    elif combo == PASS:
+        out['consumed'] = [0] * NUM_TYPES
+        out['consumed_wild'] = 0
+    return out
 
 
 def deserialize_move(d: dict) -> tuple:
@@ -71,7 +88,7 @@ def snapshot_state(env: GuandanEnv, human_seat: int, last_log=None):
         'last_player': env.last_player,
         'played': [p.astype(int).tolist() for p in env.played],
         'played_wild': list(env.played_wild),
-        'legal_moves': [serialize_move(m) for m in legal],
+        'legal_moves': [serialize_move(m, env=env) for m in legal],
         'seat_labels': {
             str(human_seat): '你',
             str(teammate): '队友',
@@ -172,9 +189,19 @@ class GameSession:
 _session: GameSession | None = None
 
 
+def _json_default(o):
+    if isinstance(o, (np.integer,)):
+        return int(o)
+    if isinstance(o, (np.floating,)):
+        return float(o)
+    if isinstance(o, np.ndarray):
+        return o.tolist()
+    raise TypeError(f"not serializable: {type(o)}")
+
+
 class Handler(BaseHTTPRequestHandler):
     def _send_json(self, obj, status=200):
-        body = json.dumps(obj, ensure_ascii=False).encode('utf-8')
+        body = json.dumps(obj, ensure_ascii=False, default=_json_default).encode('utf-8')
         self.send_response(status)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
         self.send_header('Content-Length', str(len(body)))
