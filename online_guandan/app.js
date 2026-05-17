@@ -1,9 +1,10 @@
 (function () {
   const $ = (s) => document.querySelector(s);
+  const SUITS = ['♠', '♥', '♦', '♣'];  // visual only — v6 env has no real suits
+  const RED_SUITS = new Set(['♥', '♦']);
 
   let state = null;
-  // Card instances in hand (each is a separate clickable card)
-  // each item: { id, rank, isWild, selected }
+  // Card instances in hand. Each: { id, rank, suit, isWild, selected }
   let handCards = [];
 
   async function jsonPost(url, body) {
@@ -14,28 +15,24 @@
     });
     return r.json();
   }
-  async function jsonGet(url) {
-    return (await fetch(url)).json();
-  }
+  async function jsonGet(url) { return (await fetch(url)).json(); }
 
   function rankLabel(rankIdx, rankNames) {
     const name = rankNames[rankIdx];
-    if (name === 'sj') return 'sJ';
-    if (name === 'bj') return 'BJ';
+    if (name === 'sj') return 'JOKER';
+    if (name === 'bj') return 'JOKER';
     return name;
   }
 
-  function isRedRank(rankIdx, rankNames) {
-    // Decorative only — we don't really have suits in v6
-    return rankNames[rankIdx] === 'bj';
+  // Deterministic suit cycling: card #i of rank r gets suit (i + r) % 4
+  function suitForCard(rank, idxInRank) {
+    return SUITS[(idxInRank + rank) % 4];
   }
 
   function buildHandCards(s) {
-    // Build a list of individual card instances from the rank counts.
-    // Wildcards are level-rank cards but rendered as a distinct visual.
     const cards = [];
     const lr = s.level_rank;
-    let idCounter = 0;
+    let counter = 0;
     for (let r = 0; r < 15; r++) {
       const totalAtRank = s.hand[r];
       if (totalAtRank === 0) continue;
@@ -45,71 +42,118 @@
         wild = s.wildcards;
         regular = totalAtRank - wild;
       }
+      // jokers
+      const isJoker = (s.rank_names[r] === 'sj' || s.rank_names[r] === 'bj');
+      // regular cards
       for (let i = 0; i < regular; i++) {
-        cards.push({ id: `r${r}-i${idCounter++}`, rank: r, isWild: false, selected: false });
+        const suit = isJoker ? '' : suitForCard(r, counter);
+        cards.push({
+          id: `r${r}-i${counter}`, rank: r,
+          suit, isWild: false, isJoker, selected: false
+        });
+        counter++;
       }
+      // wildcards (always red hearts)
       for (let i = 0; i < wild; i++) {
-        cards.push({ id: `w${r}-i${idCounter++}`, rank: r, isWild: true, selected: false });
+        cards.push({
+          id: `w${r}-i${counter}`, rank: r,
+          suit: '♥', isWild: true, isJoker: false, selected: false
+        });
+        counter++;
       }
     }
     return cards;
   }
 
-  function makeCardDOM(card, rankNames) {
-    const div = document.createElement('div');
-    div.className = 'card';
-    if (card.isWild) div.classList.add('wildcard');
-    if (rankNames[card.rank] === 'sj') div.classList.add('joker-small');
-    if (rankNames[card.rank] === 'bj') div.classList.add('joker-big');
-    if (isRedRank(card.rank, rankNames)) div.classList.add('red');
-    if (card.selected) div.classList.add('selected');
-    div.dataset.id = card.id;
-
-    const top = document.createElement('div');
-    top.className = 'suit';
-    top.textContent = card.isWild ? '万' : '';
-    const center = document.createElement('div');
-    center.className = 'rank';
-    center.textContent = rankLabel(card.rank, rankNames);
-    div.appendChild(top);
-    div.appendChild(center);
-
-    div.addEventListener('click', () => {
-      card.selected = !card.selected;
-      renderHand();
-      checkMatch();
-    });
-    return div;
+  function classForCard(card, rankNames) {
+    const classes = ['card'];
+    if (card.isJoker) {
+      classes.push('joker');
+      if (rankNames[card.rank] === 'sj') classes.push('joker-small');
+      else classes.push('joker-big');
+    } else if (card.isWild) {
+      classes.push('wildcard');
+      classes.push('suit-red');
+    } else {
+      classes.push(RED_SUITS.has(card.suit) ? 'suit-red' : 'suit-black');
+    }
+    if (card.selected) classes.push('selected');
+    return classes.join(' ');
   }
 
-  function makeStaticCardDOM(rank, count, rankNames, level_rank, wildcards_used, cls = 'played') {
-    // For displaying played cards (last play) — render `count` cards of the rank.
-    // For wildcards, render first `wildcards_used` as wild.
-    const frag = document.createDocumentFragment();
-    for (let i = 0; i < count; i++) {
-      const div = document.createElement('div');
-      div.className = `card ${cls}`;
-      const isWild = (rank === level_rank && i < wildcards_used);
-      if (isWild) div.classList.add('wildcard');
-      if (rankNames[rank] === 'sj') div.classList.add('joker-small');
-      if (rankNames[rank] === 'bj') div.classList.add('joker-big');
+  function makeCardDOM(card, rankNames, opts) {
+    opts = opts || {};
+    const div = document.createElement('div');
+    div.className = classForCard(card, rankNames);
+    if (opts.small) div.classList.add('played');
+    div.dataset.id = card.id;
+
+    if (card.isJoker) {
+      // big "JOKER" text with small/big distinction
       const center = document.createElement('div');
-      center.className = 'rank';
-      center.textContent = rankLabel(rank, rankNames);
+      center.className = 'center';
+      center.textContent = rankNames[card.rank] === 'bj' ? 'BIG\nJOKER' : 'SMALL\nJOKER';
+      center.style.whiteSpace = 'pre';
       div.appendChild(center);
-      frag.appendChild(div);
+    } else {
+      const label = rankLabel(card.rank, rankNames);
+      const tl = document.createElement('div');
+      tl.className = 'corner-tl';
+      tl.innerHTML = `<span>${label}</span><span>${card.suit}</span>`;
+      const br = document.createElement('div');
+      br.className = 'corner-br';
+      br.innerHTML = `<span>${label}</span><span>${card.suit}</span>`;
+      const c = document.createElement('div');
+      c.className = 'center';
+      c.textContent = card.suit;
+      div.appendChild(tl);
+      div.appendChild(br);
+      div.appendChild(c);
     }
-    return frag;
+
+    if (opts.onClick) {
+      div.addEventListener('click', opts.onClick);
+    }
+    return div;
   }
 
   function renderHand() {
     const handDiv = $('#hand');
     handDiv.innerHTML = '';
-    handCards.forEach(c => handDiv.appendChild(makeCardDOM(c, state.rank_names)));
+    handCards.forEach(c => {
+      const dom = makeCardDOM(c, state.rank_names, {
+        onClick: () => { c.selected = !c.selected; renderHand(); checkMatch(); }
+      });
+      handDiv.appendChild(dom);
+    });
+  }
+
+  function renderPlayedCards(rank, count, wildAtR, rankNames, lr) {
+    // Render `count` cards of rank, of which `wildAtR` are wildcards.
+    const row = document.createElement('div');
+    row.className = 'played-row';
+    let counter = 0;
+    const isJoker = (rankNames[rank] === 'sj' || rankNames[rank] === 'bj');
+    // regular first
+    const regular = count - wildAtR;
+    for (let i = 0; i < regular; i++) {
+      const c = {
+        rank, isWild: false, isJoker,
+        suit: isJoker ? '' : suitForCard(rank, counter),
+        selected: false,
+      };
+      row.appendChild(makeCardDOM(c, rankNames, { small: true }));
+      counter++;
+    }
+    for (let i = 0; i < wildAtR; i++) {
+      const c = { rank, isWild: true, isJoker: false, suit: '♥', selected: false };
+      row.appendChild(makeCardDOM(c, rankNames, { small: true }));
+      counter++;
+    }
+    return row;
   }
 
   function selectionSignature() {
-    // Returns { regular: [15 ints], wild: int }
     const regular = new Array(15).fill(0);
     let wild = 0;
     handCards.forEach(c => {
@@ -121,8 +165,6 @@
   }
 
   function moveExpectedSignature(move, level_rank) {
-    // The backend gave us `consumed` (total per rank) and `consumed_wild`.
-    // The total consumed at level_rank = regular_level + wildcards.
     const regular = move.consumed.slice();
     regular[level_rank] = (move.consumed[level_rank] || 0) - move.consumed_wild;
     return { regular, wild: move.consumed_wild };
@@ -134,18 +176,16 @@
     return true;
   }
 
-  function findMatchingMove() {
-    if (!state || !state.is_human_turn) return null;
+  function findMatches() {
+    if (!state || !state.is_human_turn) return [];
     const sel = selectionSignature();
     const total = sel.regular.reduce((a, b) => a + b, 0) + sel.wild;
-    if (total === 0) return null;
+    if (total === 0) return [];
     const lr = state.level_rank;
-    const matches = state.legal_moves.filter(m => {
-      if (m.combo === 0) return false; // skip PASS
-      if (!m.consumed) return false;
+    return state.legal_moves.filter(m => {
+      if (m.combo === 0 || !m.consumed) return false;
       return sigEq(sel, moveExpectedSignature(m, lr));
     });
-    return matches;
   }
 
   function checkMatch() {
@@ -156,12 +196,12 @@
       playBtn.disabled = true;
       return;
     }
-    const matches = findMatchingMove();
-    if (!matches || matches.length === 0) {
-      const sel = selectionSignature();
-      const total = sel.regular.reduce((a, b) => a + b, 0) + sel.wild;
+    const matches = findMatches();
+    const sel = selectionSignature();
+    const total = sel.regular.reduce((a, b) => a + b, 0) + sel.wild;
+    if (matches.length === 0) {
       msg.textContent = total === 0 ? '请选择要打的牌' : '当前选择不是合法组合';
-      msg.className = total === 0 ? 'match-msg' : 'match-msg';
+      msg.className = 'match-msg';
       playBtn.disabled = true;
       playBtn.dataset.move = '';
     } else if (matches.length === 1) {
@@ -170,8 +210,7 @@
       playBtn.disabled = false;
       playBtn.dataset.move = JSON.stringify(matches[0]);
     } else {
-      // Show first match; let user click play to choose, or show pick UI
-      msg.textContent = `多种解释:${matches.map(m => m.human).join(' / ')} — 按"出牌"用第一种`;
+      msg.textContent = `多种解释 (用第一种):${matches.map(m => m.human).join(' / ')}`;
       msg.className = 'match-msg ok';
       playBtn.disabled = false;
       playBtn.dataset.move = JSON.stringify(matches[0]);
@@ -179,7 +218,6 @@
   }
 
   function renderLastPlay(s) {
-    // Each player's last-play-box. Clear all first.
     document.querySelectorAll('.last-play-box').forEach(el => el.innerHTML = '');
     if (!s.last || s.last_player == null) return;
     const seatToBox = {
@@ -193,33 +231,34 @@
     const m = s.last;
     if (m.combo === 0) {
       const tag = document.createElement('div');
-      tag.style.color = '#aaa';
+      tag.className = 'pass-tag';
       tag.textContent = '不要';
       box.appendChild(tag);
       return;
     }
-    // Render consumed cards as visuals
     if (!m.consumed) {
-      // best-effort fallback
-      const tag = document.createElement('div');
-      tag.textContent = m.human;
-      box.appendChild(tag);
+      box.textContent = m.human;
       return;
     }
+    // Render consumed cards as visual cards (sorted by rank ascending)
     const lr = s.level_rank;
     const totalConsumed = m.consumed;
     const wildConsumed = m.consumed_wild || 0;
+    // We render one big row for the play
+    const row = document.createElement('div');
+    row.className = 'played-row';
     for (let r = 0; r < 15; r++) {
-      let c = totalConsumed[r];
+      const c = totalConsumed[r];
       if (c === 0) continue;
-      let wildAtR = (r === lr) ? wildConsumed : 0;
-      box.appendChild(makeStaticCardDOM(r, c, s.rank_names, lr, wildAtR, 'played'));
+      const wildAtR = (r === lr) ? wildConsumed : 0;
+      const sub = renderPlayedCards(r, c, wildAtR, s.rank_names, lr);
+      while (sub.firstChild) row.appendChild(sub.firstChild);
     }
+    box.appendChild(row);
   }
 
   function render(s) {
     state = s;
-    // Status / level
     $('#level-banner').textContent = s.level_rank_name;
     const statusEl = $('#status-banner');
     if (s.done) {
@@ -227,12 +266,10 @@
       statusEl.textContent = won ? '🎉 你方获胜!' : '😢 你方失败';
       statusEl.style.color = won ? '#4ade80' : '#f87171';
     } else {
-      const labels = s.seat_labels;
-      statusEl.textContent = `轮到:${labels[String(s.cur)] || ('seat ' + s.cur)}`;
+      statusEl.textContent = `轮到:${s.seat_labels[String(s.cur)] || ('seat ' + s.cur)}`;
       statusEl.style.color = '#f0f0e0';
     }
 
-    // Player meta + active highlight
     const TM = (s.human_seat + 2) % 4;
     const OPL = (s.human_seat + 1) % 4;
     const OPR = (s.human_seat + 3) % 4;
@@ -247,29 +284,22 @@
     $('#player-left .num').textContent = s.hand_sizes[OPL];
     $('#player-right .num').textContent = s.hand_sizes[OPR];
 
-    // Last play
     renderLastPlay(s);
 
-    // Hand
     const handTotal = s.hand.reduce((a, b) => a + b, 0);
     $('#hand-count').textContent = handTotal;
     $('#hand-wild-info').textContent = s.wildcards > 0
-      ? `(其中 ${s.wildcards} 张万能-红心${s.level_rank_name})` : '';
+      ? `(含 ${s.wildcards} 张红心${s.level_rank_name} 万能牌)` : '';
 
-    // Preserve selection where possible
     const oldSel = new Set(handCards.filter(c => c.selected).map(c => c.id));
     handCards = buildHandCards(s);
     handCards.forEach(c => { if (oldSel.has(c.id)) c.selected = true; });
     renderHand();
-
-    // Match-check
     checkMatch();
 
-    // Pass button enable check
     const hasPass = s.is_human_turn && s.legal_moves.some(m => m.combo === 0);
     $('#btn-pass').disabled = !hasPass;
 
-    // Log
     const logList = $('#log-list');
     logList.innerHTML = '';
     (s.log || []).slice(-200).forEach(e => {
@@ -296,7 +326,6 @@
     const r = await jsonPost('/api/play', { move });
     render(r);
   }
-
   async function doPass() {
     if (!state || !state.is_human_turn) return;
     const passMove = state.legal_moves.find(m => m.combo === 0);
@@ -304,13 +333,11 @@
     const r = await jsonPost('/api/play', { move: passMove });
     render(r);
   }
-
   async function doNew() {
     handCards = [];
     const r = await jsonPost('/api/new', {});
     render(r);
   }
-
   function doClear() {
     handCards.forEach(c => c.selected = false);
     renderHand();
@@ -330,6 +357,5 @@
     const s = await jsonGet('/api/state');
     render(s);
   }
-
   init();
 })();
