@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Training artifacts (large, regenerable)
+runs/
+*.pt
+*.ckpt
+/tmp/
+
+# Logs
+*.log
+
+# Editor
+.vscode/
+.idea/
+*.swp
